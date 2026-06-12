@@ -13,11 +13,10 @@ It is designed to provide both:
 1. [End-to-End Flow Diagram](#end-to-end-flow-diagram)
 2. [Pipeline Stages](#pipeline-stages)
 3. [Detailed Stage Descriptions](#detailed-stage-descriptions)
-4. [Stage-wise Flow Diagram](#stage-wise-flow-diagram)
-5. [Key Validations and Checks](#key-validations-and-checks)
-6. [Important Observations](#important-observations)
-7. [Data Storage Locations Reference](#data-storage-locations-reference)
-8. [Summary](#summary)
+4. [Key Validations and Checks](#key-validations-and-checks)
+5. [Important Observations](#important-observations)
+6. [Data Storage Locations Reference](#data-storage-locations-reference)
+7. [Summary](#summary)
 
 ---
 
@@ -168,49 +167,6 @@ The Home Delivery data processing is divided into **5 main pipeline stages**:
 - **Procedure:** `[CommGlobalRebates].[usp_RefreshSynapseFromAdls]`
 - **Action:** Refresh Synapse dedicated pool table from ADLS temp load location
 - **Target Table:** `commglobalrebates.homedelivery_data`
-
----
-
-## Stage-wise Flow Diagram
-
-```mermaid
-flowchart LR
-    S1[Stage 1<br>Preprocessing] --> S2[Stage 2<br>Source to Raw]
-    S2 --> S3[Stage 3<br>DIDQ Validation]
-    S3 --> S4[Stage 4<br>CDC and Curated]
-    S4 --> S5[Stage 5<br>Synapse Refresh]
-```
-
-### Detailed Internal Stage Flow
-
-```mermaid
-flowchart TD
-    A1[Xref File] --> A2[Copy to Xref Source]
-    A3[Inbound Data File] --> A4[Copy to Preprocess]
-    A2 --> A5[Preprocessing Notebook]
-    A4 --> A5
-    A5 --> A6[Header Correction]
-    A6 --> A7[Join Xref]
-    A7 --> A8[Derive CRM_ID]
-    A8 --> A9[Write Postprocess File]
-    A9 --> A10[Copy to Source]
-    A10 --> B1[Copy Source to Raw]
-    B1 --> B2[Archive Source]
-    B1 --> C1[source2raw_master_package.scala]
-    C1 --> C2[Column Name Validation]
-    C1 --> C3[Column Count Validation]
-    C1 --> C4[Load Raw Table]
-    C4 --> D1[raw2stage_master_package.scala]
-    D1 --> D2[Trim Service]
-    D1 --> D3[Datatype Service]
-    D1 --> D4[Data Quality Service]
-    D4 --> D5[Load Stage Table]
-    D5 --> E1[stage2curated2syn_Ecom_master_package.scala]
-    E1 --> E2[Curated Table]
-    E1 --> E3[Temp Files for Synapse]
-    E3 --> F1[usp_RefreshSynapseFromAdls]
-    F1 --> F2[commglobalrebates.homedelivery_data]
-```
 
 ---
 
