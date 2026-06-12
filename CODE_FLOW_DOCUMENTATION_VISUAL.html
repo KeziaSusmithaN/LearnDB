@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Delivery Data Processing - Code Flow Documentation</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'default',
+      securityLevel: 'loose',
+      flowchart: { useMaxWidth: true, htmlLabels: true }
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --table-header: #f3f4f6;
+      --code-bg: #f9fafb;
+      --accent: #2563eb;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 28px 64px;
+    }
+
+    h1, h2, h3, h4 {
+      color: #111827;
+      margin-top: 1.5em;
+      margin-bottom: 0.6em;
+      line-height: 1.25;
+    }
+
+    h1 {
+      font-size: 2rem;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 12px;
+      margin-top: 0;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 8px;
+    }
+
+    h3 { font-size: 1.2rem; }
+    p, li { font-size: 1rem; }
+    ul, ol { padding-left: 24px; }
+    hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 28px 0;
+    }
+
+    code {
+      background: var(--code-bg);
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 0.95em;
+      word-break: break-word;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px;
+      font-size: 0.97rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--table-header);
+      font-weight: 700;
+    }
+
+    .toc a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .toc a:hover { text-decoration: underline; }
+
+    .mermaid-wrapper {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-top: 32px;
+    }
+
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .container {
+        max-width: 100%;
+        padding: 16px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .mermaid-wrapper,
+      table,
+      h2,
+      h3 {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Home Delivery Data Processing - Code Flow Documentation</h1>
+
+    <h2 id="overview">Overview</h2>
+    <p>This document describes the end-to-end Home Delivery data flow from inbound file ingestion through preprocessing, validation, curation, and final Synapse table refresh.</p>
+    <p>It is designed to provide both:</p>
+    <ul>
+      <li><strong>Technical stage-wise details</strong></li>
+      <li><strong>Graphical flow representation</strong> for easy understanding</li>
+    </ul>
+
+    <hr />
+
+    <h2 id="table-of-contents">Table of Contents</h2>
+    <ol class="toc">
+      <li><a href="#end-to-end-flow-diagram">End-to-End Flow Diagram</a></li>
+      <li><a href="#pipeline-stages">Pipeline Stages</a></li>
+      <li><a href="#detailed-stage-descriptions">Detailed Stage Descriptions</a></li>
+      <li><a href="#key-validations-and-checks">Key Validations and Checks</a></li>
+      <li><a href="#important-observations">Important Observations</a></li>
+      <li><a href="#data-storage-locations-reference">Data Storage Locations Reference</a></li>
+      <li><a href="#summary">Summary</a></li>
+    </ol>
+
+    <hr />
+
+    <h2 id="end-to-end-flow-diagram">End-to-End Flow Diagram</h2>
+    <div class="mermaid-wrapper">
+      <pre class="mermaid">flowchart TD
+    A[HomeDelivery_Xref&lt;br/&gt;ecrmsa01] --&gt; B[Copy Xref to commdl01 Source]
+    C[Inbound HomeDelivery Data&lt;br/&gt;ecrmsa01] --&gt; D[Copy Data to Preprocess]
+    B --&gt; E[Preprocessing Notebook&lt;br/&gt;HomeDelivery_Preprocess]
+    D --&gt; E
+    E --&gt; F[Postprocess Output]
+    F --&gt; G[Copy to Source Folder]
+    G --&gt; H[Stage 2: Source to Raw]
+    H --&gt; I[Raw Table&lt;br/&gt;homedelivery_raw.homedelivery_data]
+    I --&gt; J[Stage 3: DIDQ / Validation]
+    J --&gt; K[Stage Table&lt;br/&gt;homedelivery_stage.homedelivery_data]
+    K --&gt; L[Stage 4: CDC / Curated]
+    L --&gt; M[Curated Table&lt;br/&gt;homedelivery_curated.homedelivery_data]
+    L --&gt; N[Temp Files for Synapse Load]
+    N --&gt; O[Stage 5: Synapse Refresh]
+    O --&gt; P[Synapse Table&lt;br/&gt;commglobalrebates.homedelivery_data]</pre>
+    </div>
+
+    <hr />
+
+    <h2 id="pipeline-stages">Pipeline Stages</h2>
+    <p>The Home Delivery data processing is divided into <strong>5 main pipeline stages</strong>:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Pipeline Code</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td><code>PL_HOMEDELIVERY_DATA_PREPROCESSING</code></td><td>Data Preprocessing &amp; Enrichment</td></tr>
+        <tr><td>2</td><td><code>PL_GLOBALREBATES_MASTER_PULL_SRC_RAW</code></td><td>Source to Raw Layer Migration</td></tr>
+        <tr><td>3</td><td><code>PL_GLOBALREBATES_MASTER_DI_DQ_DC_SRV_SRS</code></td><td>Data Validation &amp; Transformation</td></tr>
+        <tr><td>4</td><td><code>PL_GLOBALREBATES_MASTER_CDC_CUR</code></td><td>CDC Processing &amp; Curation</td></tr>
+        <tr><td>5</td><td><code>PL_GLOBALREBATES_MASTER_SYNP_RFR</code></td><td>Synapse Refresh &amp; Final Load</td></tr>
+      </tbody>
+    </table>
+
+    <hr />
+
+    <h2 id="detailed-stage-descriptions">Detailed Stage Descriptions</h2>
+
+    <h2 id="stage-1-data-preprocessing"><strong>STAGE 1: Data Preprocessing</strong> (<code>PL_HOMEDELIVERY_DATA_PREPROCESSING</code>)</h2>
+    <p><strong>Purpose:</strong> Prepare and enrich raw source files before they enter the core pipeline.</p>
+
+    <h3>Step 1.1: Copy Cross-Reference File</h3>
+    <ul>
+      <li><strong>Source:</strong> <code>https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/&lt;filename&gt;</code></li>
+      <li><strong>Destination:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/Source/HomeDelivery_Xref_Data/&lt;filename&gt;</code></li>
+      <li><strong>Observation:</strong> No filename format restriction is currently defined.</li>
+      <li><strong>Additional Action:</strong> Delete the source file from <code>ecrmsa01</code> after successful copy.</li>
+    </ul>
+
+    <h3>Step 1.2: Copy Home Delivery Data File</h3>
+    <ul>
+      <li><strong>Source:</strong> <code>https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/&lt;filename&gt;</code></li>
+      <li><strong>Destination:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/&lt;filename&gt;</code></li>
+    </ul>
+
+    <h3>Step 1.3: Execute Preprocessing Notebook</h3>
+    <ul>
+      <li><strong>Notebook path:</strong> <code>/Workspace/COMM - ElancoCORE-Global Rebates (GRBS)/Services/HomeDelivery_Preprocess</code></li>
+    </ul>
+
+    <h3>Preprocessing Logic</h3>
+    <ul>
+      <li>If the file was already processed previously:
+        <ol>
+          <li>Delete that file’s data from <strong>Raw</strong>, <strong>Stage</strong>, and <strong>Curated</strong> tables</li>
+          <li>Delete related entries from all <strong>log tables</strong></li>
+        </ol>
+      </li>
+      <li>Standardize / correct column headers</li>
+      <li>Join with <code>homedelivery_xref_data</code></li>
+      <li>Derive <code>CRM_ID</code></li>
+      <li>Write processed output to:</li>
+    </ul>
+    <p><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/</code></p>
+
+    <h3>Step 1.4: Post-Processing Actions</h3>
+    <ul>
+      <li>Delete existing records from Synapse target table:
+        <ul>
+          <li><code>commglobalrebates.homedelivery_data</code></li>
+        </ul>
+      </li>
+      <li>Copy processed file from Postprocess to Source:
+        <ul>
+          <li><strong>From:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/</code></li>
+          <li><strong>To:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data</code></li>
+        </ul>
+      </li>
+      <li>Cleanup temporary/exchange locations:
+        <ul>
+          <li>Delete files from exchange and preprocess folders</li>
+        </ul>
+      </li>
+    </ul>
+
+    <hr />
+
+    <h2 id="stage-2-source-to-raw-layer"><strong>STAGE 2: Source to Raw Layer</strong> (<code>PL_GLOBALREBATES_MASTER_PULL_SRC_RAW</code>)</h2>
+    <p><strong>Purpose:</strong> Move processed source data into the raw layer and archive source files.</p>
+
+    <h3>Step 2.1: Copy from Source to Raw</h3>
+    <ul>
+      <li><strong>Source:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data</code></li>
+      <li><strong>Destination:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data</code></li>
+    </ul>
+
+    <h3>Step 2.2: Archive Source Files</h3>
+    <ul>
+      <li><strong>Source Folder:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data</code></li>
+      <li><strong>Archive Location:</strong> <code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data</code></li>
+    </ul>
+
+    <hr />
+
+    <h2 id="stage-3-data-integration-quality-validation"><strong>STAGE 3: Data Integration, Quality &amp; Validation</strong> (<code>PL_GLOBALREBATES_MASTER_DI_DQ_DC_SRV_SRS</code>)</h2>
+    <p><strong>Purpose:</strong> Validate source structure and apply DIDQ rules before loading into stage.</p>
+
+    <h3>Component 3.1: <code>source2raw_master_package.scala</code></h3>
+    <p><strong>Functions performed:</strong></p>
+    <ul>
+      <li>Read input source file</li>
+      <li>Validate column names</li>
+      <li>Validate column count</li>
+      <li>Insert only new records using <strong>EXCEPT</strong> logic</li>
+      <li>Write output to raw table:</li>
+    </ul>
+    <p><code>homedelivery_raw.homedelivery_data</code></p>
+
+    <h3>Component 3.2: <code>raw2stage_master_package.scala</code></h3>
+    <p><strong>Functions performed:</strong></p>
+    <ul>
+      <li>Read data from raw table</li>
+      <li>Filter records for the current file</li>
+      <li>Apply DIDQ validation services:
+        <ul>
+          <li>Trim service</li>
+          <li>Datatype service</li>
+          <li>Data quality service</li>
+        </ul>
+      </li>
+      <li>Write output to stage table:</li>
+    </ul>
+    <p><code>homedelivery_stage.homedelivery_data</code></p>
+
+    <hr />
+
+    <h2 id="stage-4-cdc-curation"><strong>STAGE 4: CDC &amp; Curation</strong> (<code>PL_GLOBALREBATES_MASTER_CDC_CUR</code>)</h2>
+    <p><strong>Purpose:</strong> Prepare curated output and generate Synapse-ready data.</p>
+
+    <h3>Component 4.1: <code>stage2curated2syn_Ecom_master_package.scala</code></h3>
+    <p><strong>Functions performed:</strong></p>
+    <ul>
+      <li>Read records from the stage table</li>
+      <li>Apply CDC logic if enabled</li>
+      <li>Write current file data into curated table:</li>
+    </ul>
+    <p><code>homedelivery_curated.homedelivery_data</code></p>
+    <ul>
+      <li>Write current file data to temporary storage for Synapse dedicated pool load</li>
+      <li>Delete processed files from:
+        <ul>
+          <li>Raw folder</li>
+          <li>Source folder</li>
+        </ul>
+      </li>
+    </ul>
+
+    <hr />
+
+    <h2 id="stage-5-synapse-refresh"><strong>STAGE 5: Synapse Refresh</strong> (<code>PL_GLOBALREBATES_MASTER_SYNP_RFR</code>)</h2>
+    <p><strong>Purpose:</strong> Load the latest curated output into Synapse dedicated pool.</p>
+
+    <h3>Stored Procedure</h3>
+    <ul>
+      <li><strong>Procedure:</strong> <code>[CommGlobalRebates].[usp_RefreshSynapseFromAdls]</code></li>
+      <li><strong>Action:</strong> Refresh Synapse dedicated pool table from ADLS temp load location</li>
+      <li><strong>Target Table:</strong> <code>commglobalrebates.homedelivery_data</code></li>
+    </ul>
+
+    <hr />
+
+    <h2 id="key-validations-and-checks">Key Validations and Checks</h2>
+
+    <h3><strong>Column and Structural Validations</strong></h3>
+    <ul>
+      <li>Column name validation</li>
+      <li>Column count validation</li>
+      <li>Datatype validation</li>
+    </ul>
+
+    <h3><strong>Data Quality Services</strong></h3>
+    <ul>
+      <li>Trim service</li>
+      <li>Datatype service</li>
+      <li>Data quality service</li>
+    </ul>
+
+    <h3><strong>Duplicate Handling</strong></h3>
+    <ul>
+      <li>EXCEPT clause is used to write only new records</li>
+      <li>Reprocessed files are cleaned from Raw, Stage, Curated, and log tables before rerun</li>
+    </ul>
+
+    <hr />
+
+    <h2 id="important-observations">Important Observations</h2>
+
+    <h3><strong>Datatype Observations</strong></h3>
+    <ul>
+      <li>As per Home Delivery metadata, all columns are strings except:
+        <ul>
+          <li><code>sold</code></li>
+          <li><code>amount</code></li>
+        </ul>
+      </li>
+      <li>Because of this, date columns currently do <strong>not</strong> have datatype integrity enforcement</li>
+    </ul>
+
+    <h3><strong>Primary Key Metadata</strong></h3>
+    <ul>
+      <li>No primary key metadata is defined for Home Delivery data</li>
+    </ul>
+
+    <h3><strong>NULL Checks</strong></h3>
+    <ul>
+      <li>NOT NULL validations are commented out</li>
+    </ul>
+
+    <h3><strong>CDC Status</strong></h3>
+    <ul>
+      <li>CDC indicator is currently not enabled for Home Delivery</li>
+    </ul>
+
+    <hr />
+
+    <h2 id="data-storage-locations-reference">Data Storage Locations Reference</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>Location</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Xref Exchange</strong></td><td><code>https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/&lt;filename&gt;</code></td></tr>
+        <tr><td><strong>Xref Commdl01 Source</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/Source/HomeDelivery_Xref_Data/&lt;filename&gt;</code></td></tr>
+        <tr><td><strong>Inbound Source Data</strong></td><td><code>https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/&lt;filename&gt;</code></td></tr>
+        <tr><td><strong>Preprocess</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/&lt;filename&gt;</code></td></tr>
+        <tr><td><strong>Postprocess</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/</code></td></tr>
+        <tr><td><strong>Source</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data</code></td></tr>
+        <tr><td><strong>Raw</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data</code></td></tr>
+        <tr><td><strong>Archive</strong></td><td><code>https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data</code></td></tr>
+        <tr><td><strong>Synapse Table</strong></td><td><code>commglobalrebates.homedelivery_data</code></td></tr>
+      </tbody>
+    </table>
+
+    <hr />
+
+    <h2 id="summary">Summary</h2>
+    <p>The Home Delivery process follows a <strong>5-stage ETL pipeline</strong>:</p>
+    <ol>
+      <li><strong>Preprocess</strong> inbound and xref files</li>
+      <li><strong>Move</strong> processed files into source and raw layers</li>
+      <li><strong>Validate</strong> structure and apply DIDQ rules</li>
+      <li><strong>Curate</strong> and prepare Synapse-ready output</li>
+      <li><strong>Refresh</strong> Synapse dedicated pool with latest data</li>
+    </ol>
+
+    <p>This version adds visual documentation so that both technical and business users can quickly understand the complete flow.</p>
+
+    <hr />
+
+    <p class="note"><em>Last Updated: 2026-06-12</em><br /><em>Document Version: 2.0</em></p>
+  </div>
+</body>
+</html>
