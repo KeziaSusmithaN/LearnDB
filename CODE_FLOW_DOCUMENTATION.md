@@ -7,10 +7,11 @@ This document outlines the complete data flow for Home Delivery data processing 
 
 ## Table of Contents
 1. [Pipeline Stages](#pipeline-stages)
-2. [Data Flow Diagram](#data-flow-diagram)
-3. [Detailed Stage Descriptions](#detailed-stage-descriptions)
-4. [Key Validations and Checks](#key-validations-and-checks)
-5. [Important Observations](#important-observations)
+2. [Detailed Stage Descriptions](#detailed-stage-descriptions)
+3. [Key Validations and Checks](#key-validations-and-checks)
+4. [Important Observations](#important-observations)
+5. [Data Storage Locations Reference](#data-storage-locations-reference)
+6. [Summary](#summary)
 
 ---
 
@@ -28,272 +29,138 @@ The data processing is divided into **5 main pipeline stages**:
 
 ---
 
-## Data Flow Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ STAGE 1: PREPROCESSING (PL_HOMEDELIVERY_DATA_PREPROCESSING)     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  Exchange (ADLS)                     Commdl01 (ADLS)             │
-│  ┌──────────────────────┐    ┌───────────────────────────────┐  │
-│  │ HomeDelivery_Xref    │───▶│ Source/HomeDelivery_Xref_Data │  │
-│  │ HomeDelivery_Data    │    └───────────────────────────────┘  │
-│  │ (Inbound)            │                                        │
-│  └──────────────────────┘    ┌───────────────────���───────────┐  │
-│           │                  │ Preprocess/HomeDelivery_Data   │  │
-│           └─────────────────▶│ (Preprocessing Notebook)       │  │
-│                              │ • Header normalization         │  │
-│                              │ • CRM_ID enrichment (via xref) │  │
-│                              └───────────────────────────────┘  │
-│                                         │                       │
-│                                         ▼                       │
-│                              ┌───────────────────────────────┐  │
-│                              │ Postprocess/HomeDelivery_Data │  │
-│                              │ (Synapse Load)                │  │
-│                              └───────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ STAGE 2: SOURCE TO RAW (PL_GLOBALREBATES_MASTER_PULL_SRC_RAW)   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ Copy from Postprocess to Source                         │    │
-│  │ Source/HomeDelivery_Data ──▶ Raw/source/homedelivery_data    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                   │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ Archive processed files                                 │    │
-│  │ Source/HomeDelivery_Data ──▶ Source/Archive/Home...    │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ STAGE 3: VALIDATION & TRANSFORMATION                            │
-│ (PL_GLOBALREBATES_MASTER_DI_DQ_DC_SRV_SRS)                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  source2raw_master_package.scala                                │
-│  • Read input source file                                       │
-│  • Column name & count validation                               │
-│  • Write new records to Raw table (EXCEPT clause)               │
-│                      │                                          │
-│                      ▼                                          │
-│  raw2stage_master_package.scala                                 │
-│  • Trim service                                                 │
-│  • Datatype validation service                                  │
-│  • Data quality service                                         │
-│  • Write new records to Stage table (EXCEPT clause)             │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ STAGE 4: CDC & CURATION                                         │
-│ (PL_GLOBALREBATES_MASTER_CDC_CUR)                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  stage2curated2syn_Ecom_master_package.scala                    │
-│  • CDC Indicator: NOT ENABLED for Home Delivery                 │
-│  • Write current file data to Curated layer                     │
-│  • Write current file data to temp location (for Synapse)       │
-│  • Delete files from Raw/Source folder                          │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ STAGE 5: SYNAPSE REFRESH                                        │
-│ (PL_GLOBALREBATES_MASTER_SYNP_RFR)                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  • Merge parquet files from previous step                       │
-│  • Execute: usp_RefreshSynapseFromAdls                          │
-│  • Push latest data into dedicated pool table                   │
-│  • Target: [CommGlobalRebates].[homedelivery_data]              │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Detailed Stage Descriptions
 
 ### **STAGE 1: Data Preprocessing** (`PL_HOMEDELIVERY_DATA_PREPROCESSING`)
 
-**Purpose:** Prepare and enrich raw data files before processing
+**Purpose:** Prepare and enrich raw data files before processing.
 
-**Steps:**
+#### 1. Copy Cross-Reference File
+- **Source:** `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/<filename>`
+- **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/Source/HomeDelivery_Xref_Data/<filename>`
+- **Note:** No filename format is defined.
+- **Additional action:** Delete file from `ecrmsa01` after copy.
 
-1. **Copy Cross-Reference File**
-   - **Source:** `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/<filename>`
-   - **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/Source/HomeDelivery_Xref_Data/<filename>`
-   - **Note:** No specific filename format defined
+#### 2. Copy Data File
+- **Source:** `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/<filename>`
+- **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/<filename>`
 
-2. **Copy Data File**
-   - **Source:** `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/<filename>`
-   - **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/<filename>`
-   - **Action:** Delete file from ecrmsa01 after copying
+#### 3. Preprocessing Notebook
+- **Notebook path:** `/Workspace/COMM - ElancoCORE-Global Rebates (GRBS)/Services/HomeDelivery_Preprocess`
 
-3. **Preprocessing Notebook Execution**
-   - **Location:** `/Workspace/COMM - ElancoCORE-Global Rebates (GRBS)/Services/HomeDelivery_Preprocess`
-   
-   **Logic:**
-   - **Duplicate Check:** If file was previously processed:
-     - Delete data from Raw/Stage/Curated tables for this filename
-     - Delete data from all log tables for this filename
-   
-   - **Data Transformation:**
-     - Normalize column headers to corrected names per source specifications
-     - Join with `homedelivery_xref_data` to enrich with CRM_ID
-   
-   - **Output:** Write processed data to `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/`
+**Logic:**
+- If the file was processed previously:
+  1. Delete the file's data from Raw, Stage, and Curated tables.
+  2. Delete the file's data from all log tables.
+- Convert column headers to corrected names for each source.
+- Join with `homedelivery_xref_data` and derive `CRM_ID`.
+- Write processed data into:
+  `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/`
 
-4. **Database Operations**
-   - **Delete from Synapse:** `commglobalrebates.homedelivery_data`
-   - **Copy to Source Folder:** Move from Postprocess to Source location
-   - **Cleanup:** Delete data from Exchange/Preprocess folders
+#### 4. Post-Processing Actions
+- **Delete data from Synapse table:** `commglobalrebates.homedelivery_data`
+- **Copy data file from Postprocess to Source folder:**
+  - From: `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/`
+  - To: `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data`
+- **Cleanup:** Delete data from exchange and preprocess folders.
 
 ---
 
 ### **STAGE 2: Source to Raw Layer** (`PL_GLOBALREBATES_MASTER_PULL_SRC_RAW`)
 
-**Purpose:** Migrate validated data to Raw layer and maintain source archive
+**Purpose:** Copy processed source data into raw layer and maintain archive.
 
-**Steps:**
+#### 1. Copy from Source to Raw
+- **Source:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data`
+- **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data`
 
-1. **Source to Raw Copy**
-   - **Source:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data`
-   - **Destination:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data`
-
-2. **Archive Source Files**
-   - **Source:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data`
-   - **Archive Location:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data`
-   - **Purpose:** Maintain historical copy for audit trail
+#### 2. Archive Source Folder
+- **Source:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data`
+- **Archive location:** `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data`
 
 ---
 
 ### **STAGE 3: Data Integration, Quality & Validation** (`PL_GLOBALREBATES_MASTER_DI_DQ_DC_SRV_SRS`)
 
-**Purpose:** Validate data quality and apply business rules transformations
+**Purpose:** Validate source structure and apply DIDQ rules before stage load.
 
-**Component 1: Source to Raw (`source2raw_master_package.scala`)**
+#### Component 1: `source2raw_master_package.scala`
+- Read input source file.
+- Perform column name validation.
+- Perform column count validation.
+- Write new records to raw table using EXCEPT clause.
+- **Raw table:** `homedelivery_raw.homedelivery_data`
 
-Operations:
-- Read input source file from Raw layer
-- **Validations:**
-  - Column name validation (verify expected columns exist)
-  - Column count validation (verify expected number of columns)
-- Write new records to Raw table
-  - Uses EXCEPT clause to identify new records only
-  - Avoids duplicate processing
-
-**Component 2: Raw to Stage (`raw2stage_master_package.scala`)**
-
-Operations:
-- **Trim Service:** Remove leading/trailing whitespace from string columns
-- **Datatype Service:** Validate and convert columns to correct data types
-- **Data Quality Service:** Apply quality checks per DIDQ specifications
-- Write new records to Stage table
-  - Uses EXCEPT clause for delta processing
-  - Only new/modified records processed
+#### Component 2: `raw2stage_master_package.scala`
+- Read data from raw table.
+- Filter for current file.
+- Apply DIDQ validations:
+  - Trim service
+  - Datatype service
+  - Data quality service
+- Write records to stage table.
+- **Stage table:** `homedelivery_stage.homedelivery_data`
 
 ---
 
 ### **STAGE 4: CDC & Curation** (`PL_GLOBALREBATES_MASTER_CDC_CUR`)
 
-**Purpose:** Apply Change Data Capture (CDC) logic and prepare final curated dataset
+**Purpose:** Curate current file data and prepare Synapse-ready output.
 
-**Component: `stage2curated2syn_Ecom_master_package.scala`**
+#### Component: `stage2curated2syn_Ecom_master_package.scala`
+- Read data from stage table and apply CDC if enabled.
+- Write current file data to curated layer.
+- **Curated table:** `homedelivery_curated.homedelivery_data`
+- Write current file data to a temp location used for Synapse dedicated pool load.
+- Delete files from Raw and Source folders.
 
-**CDC Processing:**
-- **Status:** CDC Indicator NOT ENABLED for Home Delivery data
-- This means full refresh approach (all records processed each run)
-
-**Curation Steps:**
-1. Write current file data to **Curated layer**
-   - Final business-ready dataset
-   
-2. Write current file data to **Temporary location**
-   - Staging for Synapse load in next stage
-   
-3. **Cleanup Operations:**
-   - Delete processed files from Raw layer
-   - Delete processed files from Source layer
-   - Maintains clean ADLS structure
+**Observation:** Home Delivery does not have CDC enabled.
 
 ---
 
 ### **STAGE 5: Synapse Refresh** (`PL_GLOBALREBATES_MASTER_SYNP_RFR`)
 
-**Purpose:** Load final curated data into Synapse dedicated SQL pool
+**Purpose:** Push latest data into Synapse dedicated pool.
 
-**Steps:**
-
-1. **Merge Parquet Files**
-   - Consolidate parquet files from previous CDC/Curated stage
-   - Creates single unified dataset for load
-
-2. **Execute Synapse Refresh Procedure**
-   - **Procedure:** `[CommGlobalRebates].[usp_RefreshSynapseFromAdls]`
-   - **Target Table:** `[CommGlobalRebates].[homedelivery_data]`
-   - Pushes merged data into dedicated pool table
-   - Makes data available for analytics and reporting
+#### Stored Procedure
+- **Procedure:** `[CommGlobalRebates].[usp_RefreshSynapseFromAdls]`
+- **Action:** Push latest data into dedicated pool table.
+- **Target table:** `commglobalrebates.homedelivery_data`
 
 ---
 
 ## Key Validations and Checks
 
-### **Column Validations**
-- Column name validation against metadata
+### **Column and Structural Validations**
+- Column name validation
 - Column count validation
-- Data type enforcement
+- Datatype validation
 
 ### **Data Quality Services**
-- Trim whitespace from string values
-- Type conversion services
-- Data quality rule application
+- Trim service
+- Datatype service
+- Data quality service
 
-### **Duplicate Prevention**
-- EXCEPT clause usage in Scala packages prevents duplicate record writes
-- Historical data deletion before reprocessing prevents duplication
-
-### **Duplicate File Handling**
-- If a file is reprocessed:
-  1. Delete all data for that filename from Raw/Stage/Curated tables
-  2. Delete all related log entries
-  3. Reprocess cleanly from source
+### **Duplicate Handling**
+- EXCEPT clause is used to write only new records.
+- Reprocessed files are cleaned from Raw, Stage, Curated, and log tables before rerun.
 
 ---
 
 ## Important Observations
 
-### **Data Type Constraints**
-- **String Columns:** All Home Delivery columns are stored as STRING data type
-  - **Exception:** `sold` and `amount` columns (numeric)
-  - **Impact:** Date columns do not have referential integrity checks
-  - Dates stored as strings require explicit parsing during consumption
+### **Datatype Observations**
+- As per Home Delivery metadata, all columns are strings except `sold` and `amount`.
+- Therefore, date columns do not currently have datatype integrity.
 
-### **Primary Key Definition**
-- **No Primary Key Metadata:** Home Delivery dataset lacks primary key definition
-- **Implication:** 
-  - Uniqueness enforcement not possible at data layer
-  - Business logic must handle potential duplicates
-  - De-duplication should occur at consumption layer if needed
+### **Primary Key Metadata**
+- No primary key metadata is set for Home Delivery data.
 
-### **Data Quality Checks**
-- **NULL Validations:** NOT NULL checks are currently **COMMENTED OUT**
-- **Status:** Requires review and potential enablement
-- **Recommendation:** Evaluate if NULL values are acceptable for each column
+### **NULL Checks**
+- NOT NULL checks are commented out.
 
 ### **CDC Status**
-- **Change Data Capture:** NOT ENABLED for Home Delivery
-- **Processing Mode:** Full refresh approach
-- **Performance:** All records processed regardless of changes
-- **Consideration:** Evaluate CDC enablement for performance optimization
+- CDC indicator is not enabled for Home Delivery.
 
 ---
 
@@ -301,30 +168,31 @@ Operations:
 
 | Layer | Location |
 |-------|----------|
-| **Source (Exchange)** | `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/` |
-| **Preprocessing** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/` |
-| **Postprocessing** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/` |
-| **Source (Commdl01)** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data/` |
-| **Raw** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data/` |
-| **Stage** | (Synapse internal table) |
-| **Curated** | (Synapse internal table) |
-| **Archive** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data/` |
+| **Xref Exchange** | `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/<filename>` |
+| **Xref Commdl01 Source** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Xref/Source/HomeDelivery_Xref_Data/<filename>` |
+| **Inbound Source Data** | `https://bpaze1iecrmsa01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Data/Inbound/<filename>` |
+| **Preprocess** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/Preprocess/HomeDelivery_Data/<filename>` |
+| **Postprocess** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery_Postprocess/HomeDelivery_Data/` |
+| **Source** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/HomeDelivery_Data` |
+| **Raw** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Raw/source/homedelivery_data` |
+| **Archive** | `https://bpaze1icommdl01.dfs.core.windows.net/comm-globalrebates/HomeDelivery/Source/Archive/HomeDelivery_Data` |
+| **Synapse Table** | `commglobalrebates.homedelivery_data` |
 
 ---
 
 ## Summary
 
-The Home Delivery data processing pipeline is a **5-stage ETL process** that:
+The Home Delivery data processing flow is a **5-stage ETL pipeline**:
 
-1. ✅ **Preprocesses** raw data with cross-reference enrichment
-2. ✅ **Migrates** validated data to Raw layer with archival
-3. ✅ **Validates** data quality and applies transformations
-4. ✅ **Curates** data with CDC awareness and cleanup
-5. ✅ **Loads** final dataset into Synapse for consumption
+1. **Preprocess** xref and inbound source files.
+2. **Move** processed data into source and raw layers.
+3. **Validate** structure and apply DIDQ transformations.
+4. **Curate** current file data and prepare Synapse-ready output.
+5. **Refresh** Synapse dedicated pool with the latest data.
 
-**Key takeaway:** Data flows from Exchange ADLS through preprocessing, validation, and curation layers before final Synapse population, with complete audit trails maintained through archival mechanisms.
+**Key takeaway:** Home Delivery follows a full-refresh style pipeline with preprocessing, source-to-raw movement, DIDQ validation, curated output generation, and Synapse load. CDC is currently not enabled, and key metadata constraints such as primary key and NOT NULL enforcement are limited.
 
 ---
 
-*Last Updated: 2026-06-12*
-*Document Version: 1.0*
+*Last Updated: 2026-06-12*  
+*Document Version: 1.1*
