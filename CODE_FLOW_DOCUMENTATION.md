@@ -114,8 +114,6 @@ The data processing is divided into **5 main pipeline stages**:
 - Write current file data to a temp location used for Synapse dedicated pool load.
 - Delete files from Raw and Source folders.
 
-**Observation:** Home Delivery does not have CDC enabled.
-
 ---
 
 ### **STAGE 5: Synapse Refresh** (`PL_GLOBALREBATES_MASTER_SYNP_RFR`)
@@ -189,8 +187,6 @@ The Home Delivery data processing flow is a **5-stage ETL pipeline**:
 3. **Validate** structure and apply DIDQ transformations.
 4. **Curate** current file data and prepare Synapse-ready output.
 5. **Refresh** Synapse dedicated pool with the latest data.
-
-**Key takeaway:** Home Delivery follows a full-refresh style pipeline with preprocessing, source-to-raw movement, DIDQ validation, curated output generation, and Synapse load. CDC is currently not enabled, and key metadata constraints such as primary key and NOT NULL enforcement are limited.
 
 ---
 
